@@ -1,34 +1,7 @@
-# eframe template
+# Polymesh API example GUI
 
-[![dependency status](https://deps.rs/repo/github/emilk/eframe_template/status.svg)](https://deps.rs/repo/github/emilk/eframe_template)
-[![Build Status](https://github.com/emilk/eframe_template/workflows/CI/badge.svg)](https://github.com/emilk/eframe_template/actions?workflow=CI)
-
-This is a template repo for [eframe](https://github.com/emilk/egui/tree/master/eframe), a framework for writing apps using [egui](https://github.com/emilk/egui/).
-
-The goal is for this to be the simplest way to get started writing a GUI app in Rust.
-
-You can compile your app natively or for the web, and share it using Github Pages.
 
 ## Getting started
-
-Start by clicking "Use this template" at https://github.com/emilk/eframe_template/ or follow [these instructions](https://docs.github.com/en/free-pro-team@latest/github/creating-cloning-and-archiving-repositories/creating-a-repository-from-a-template).
-
-Change the name of the crate: Chose a good name for your project, and change the name to it in:
-* `Cargo.toml`
-    * Change the `package.name` from `eframe_template` to `your_crate`
-    * Change the `package.authors`
-    * Change the `package.default-run` from `eframe_template_bin` to `your_crate_bin` (note the `_bin`!)
-    * Change the `bin.name` from `eframe_template_bin` to `your_crate_bin` (note the `_bin`!)
-* `main.rs`
-    * Change `eframe_template::TemplateApp` to `your_crate::TemplateApp`
-* `docs/index.html`
-    * Change the `<title>`
-    * Change the `<script src=…` line from `eframe_template.js` to `your_crate.js`
-    * Change the `wasm_bindgen(…` line from `eframe_template_bg.wasm` to `your_crate_bg.wasm` (note the `_bg`!)
-* `docs/sw.js`
-    * Change the `'./eframe_template.js'` to `./your_crate.js` (in `filesToCache` array)
-    * Change the `'./eframe_template_bg.wasm'` to `./your_crate_bg.wasm` (in `filesToCache` array)
-* Remove the web build of the old name: `rm docs/eframe_template*`
 
 ### Learning about egui
 
@@ -72,14 +45,14 @@ open http://127.0.0.1:8080/
 
 The finished web app is found in the `docs/` folder (this is so that you can easily share it with [GitHub Pages](https://docs.github.com/en/free-pro-team@latest/github/working-with-github-pages/configuring-a-publishing-source-for-your-github-pages-site)). It consists of three files:
 
-* `index.html`: A few lines of HTML, CSS and JS that loads your app. **You need to edit this** (once) to replace `eframe_template` with the name of your crate!
+* `index.html`: A few lines of HTML, CSS and JS that loads your app. **You need to edit this** (once) to replace `polymesh_api_example_gui` with the name of your crate!
 * `your_crate_bg.wasm`: What the Rust code compiles to.
 * `your_crate.js`: Auto-generated binding between Rust and JS.
 
-You can test the template app at <https://emilk.github.io/eframe_template/>.
+You can test the template app at <https://polymeshassociation.github.io/polymesh_api_example_gui/>.
 
 ## Updating egui
 
-As of 2022, egui is in active development with frequent releases with breaking changes. [eframe_template](https://github.com/emilk/eframe_template/) will be updated in lock-step to always use the latest version of egui.
+As of 2022, egui is in active development with frequent releases with breaking changes. [polymesh_api_example_gui](https://github.com/emilk/polymesh_api_example_gui/) will be updated in lock-step to always use the latest version of egui.
 
 When updating `egui` and `eframe` it is recommended you do so one version at the time, and read about the changes in [the egui changelog](https://github.com/emilk/egui/blob/master/CHANGELOG.md) and [eframe changelog](https://github.com/emilk/egui/blob/master/eframe/CHANGELOG.md).
