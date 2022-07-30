@@ -11,6 +11,6 @@ fn main() {
   eframe::run_native(
     "eframe template",
     native_options,
-    Box::new(|cc| Box::new(polymesh_api_example_gui::TemplateApp::new(cc))),
+    Box::new(|cc| Box::new(polymesh_api_example_gui::PolymeshApp::new(cc))),
   );
 }

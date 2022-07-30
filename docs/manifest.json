@@ -1,6 +1,6 @@
 {
-    "name": "Egui Template PWA",
-    "short_name": "egui-template-pwa",
+    "name": "Polymesh Rust GUI PWA",
+    "short_name": "polymesh-rust-gui-pwa",
     "icons": [{
       "src": "./icon-256.png",
         "sizes": "256x256",
