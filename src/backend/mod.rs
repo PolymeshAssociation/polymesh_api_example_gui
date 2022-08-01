@@ -7,6 +7,11 @@ use serde_json::{to_value, Value};
 pub use polymesh_api::client::*;
 use polymesh_api::*;
 
+#[cfg(target_arch = "wasm32")]
+const PRELOAD_BLOCKS: usize = 20;
+#[cfg(not(target_arch = "wasm32"))]
+const PRELOAD_BLOCKS: usize = 1000;
+
 #[derive(Clone, Debug)]
 pub struct EventInfo {
   pub block: BlockNumber,
@@ -178,7 +183,7 @@ impl InnerBackend {
       let mut parent = current.parent_hash;
       let mut headers = Vec::new();
       headers.push(current);
-      for _ in 0..1000 {
+      for _ in 0..PRELOAD_BLOCKS {
         match client.get_block_header(Some(parent)).await? {
           Some(header) => {
             parent = header.parent_hash;
