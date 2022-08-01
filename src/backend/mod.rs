@@ -14,14 +14,20 @@ pub type UpdateSender = mpsc::Sender<UpdateMessage>;
 pub type UpdateReceiver = mpsc::Receiver<UpdateMessage>;
 
 pub struct Backend {
+  url: String,
   recv: UpdateReceiver,
 }
 
 impl Backend {
   pub fn new(url: &str) -> Self {
     Self {
+      url: url.to_string(),
       recv: spawn_backend(url)
     }
+  }
+
+  pub fn get_url(&self) -> &str {
+    &self.url
   }
 
   pub fn next_update(&mut self) -> Option<UpdateMessage> {

@@ -2366,6 +2366,7 @@ dependencies = [
  "async-trait",
  "frame-metadata",
  "hex",
+ "http",
  "impl-serde",
  "jsonrpsee",
  "lazy_static",

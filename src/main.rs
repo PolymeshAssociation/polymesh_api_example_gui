@@ -9,7 +9,7 @@ fn main() {
 
   let native_options = eframe::NativeOptions::default();
   eframe::run_native(
-    "eframe template",
+    "Polymesh Rust App",
     native_options,
     Box::new(|cc| Box::new(polymesh_api_example_gui::PolymeshApp::new(cc))),
   );
