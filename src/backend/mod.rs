@@ -178,6 +178,8 @@ impl InnerBackend {
   async fn run(self) -> Result<()> {
     let client = self.api.client();
 
+    let mut sub_blocks = client.subscribe_blocks().await?;
+
     // Grab the last X blocks.
     if let Some(current) = client.get_block_header(None).await? {
       let mut parent = current.parent_hash;
@@ -199,8 +201,6 @@ impl InnerBackend {
         self.push_block(header).await?;
       }
     }
-
-    let mut sub_blocks = client.subscribe_blocks().await?;
 
     while let Some(header) = sub_blocks.next().await.transpose()? {
       //log::info!("{}: {}", header.number, header.hash());
