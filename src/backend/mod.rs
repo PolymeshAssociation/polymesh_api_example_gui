@@ -8,7 +8,7 @@ pub use polymesh_api::client::*;
 use polymesh_api::*;
 
 #[cfg(target_arch = "wasm32")]
-const PRELOAD_BLOCKS: usize = 20;
+const PRELOAD_BLOCKS: usize = 5;
 #[cfg(not(target_arch = "wasm32"))]
 const PRELOAD_BLOCKS: usize = 1000;
 
