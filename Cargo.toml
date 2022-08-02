@@ -21,6 +21,8 @@ serde = { version = "1", features = ["derive"] } # You only need this if you wan
 serde_json = { version = "1.0", features = ["preserve_order"] }
 anyhow = "1.0.58"
 log = "0.4.17"
+egui_extras = { version = "0.18.0", features = ["serde"] }
+hex = "0.4.3"
 
 #sp-keyring = { version = "6.0.0", default-features = false }
 

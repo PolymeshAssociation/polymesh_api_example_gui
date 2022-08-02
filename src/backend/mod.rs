@@ -123,7 +123,7 @@ impl Backend {
     Ok(())
   }
 
-  pub fn get_block_info(&mut self, hash: BlockHash) -> Result<()> {
+  pub fn get_block_info(&self, hash: BlockHash) -> Result<()> {
     self
       .req_tx
       .blocking_send(BackendRequest::GetBlockInfo(hash))?;
@@ -207,7 +207,6 @@ pub struct InnerBackend {
   api: Api,
   event_tx: BackendEventSender,
   req_rx: BackendRequestReceiver,
-  auto_reconnect: bool,
 }
 
 impl InnerBackend {
@@ -220,12 +219,11 @@ impl InnerBackend {
       api,
       event_tx,
       req_rx,
-      auto_reconnect: true,
     };
     // First connect.
     let mut is_reconnect = false;
 
-    while inner.auto_reconnect {
+    while !inner.is_closed() {
       match inner.run(is_reconnect).await {
         Ok(true) => (),
         Ok(false) => {
@@ -241,16 +239,15 @@ impl InnerBackend {
     Ok(())
   }
 
-  async fn send(&mut self, msg: BackendEvent) -> Result<()> {
-    let res = self.event_tx.send(msg).await;
-    if res.is_err() {
-      // Frontend closed channel, need to shutdown.
-      self.auto_reconnect = false;
-    }
-    res.map_err(|e| e.into())
+  fn is_closed(&self) -> bool {
+    self.event_tx.is_closed()
   }
 
-  async fn push_block(&mut self, header: Header) -> Result<()> {
+  async fn send(&self, msg: BackendEvent) -> Result<()> {
+    Ok(self.event_tx.send(msg).await?)
+  }
+
+  async fn push_block(&self, header: Header) -> Result<()> {
     let hash = header.hash();
     // Get block events.
     let events = self
@@ -278,7 +275,7 @@ impl InnerBackend {
     Ok(self.api.client().get_block_header(hash).await?)
   }
 
-  async fn connected(&mut self, is_reconnect: bool) -> Result<()> {
+  async fn connected(&self, is_reconnect: bool) -> Result<()> {
     let genesis = self.get_block_hash(0).await?;
     self
       .send(BackendEvent::Connected {

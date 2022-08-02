@@ -1,6 +1,7 @@
 use std::collections::{HashMap, VecDeque};
 
 use egui::*;
+use egui_extras::{Size, StripBuilder, TableBuilder};
 
 use crate::backend::*;
 
@@ -45,6 +46,8 @@ pub struct BackendState {
   best_block: BlockNumber,
 
   #[serde(skip)]
+  hash_to_number: HashMap<BlockHash, BlockNumber>,
+  #[serde(skip)]
   blocks: HashMap<BlockNumber, BlockInfo>,
   #[serde(skip)]
   recent_blocks: VecDeque<BlockNumber>,
@@ -64,6 +67,8 @@ impl Default for BackendState {
       best_block: 0,
       preload_blocks: PRELOAD_BLOCKS as u32,
       preload_next: None,
+
+      hash_to_number: Default::default(),
       blocks: Default::default(),
       recent_blocks: Default::default(),
       recent_events: Default::default(),
@@ -75,18 +80,29 @@ impl Default for BackendState {
 impl BackendState {
   fn clear(&mut self) {
     self.genesis_hash = None;
-    self.blocks.clear();
     self.best_block = 0;
-    self.recent_blocks.clear();
-    self.recent_events.clear();
     self.preload_blocks = PRELOAD_BLOCKS;
     self.preload_next = None;
+
+    self.hash_to_number.clear();
+    self.blocks.clear();
+    self.recent_blocks.clear();
+    self.recent_events.clear();
   }
 
   fn connect(&mut self) {
     match self.backend.connect_to(&self.url) {
       Err(err) => {
         log::error!("Failed to send ConnectTo reqest to backend: {err:?}");
+      }
+      _ => (),
+    }
+  }
+
+  fn get_block_info(&self, hash: BlockHash) {
+    match self.backend.get_block_info(hash) {
+      Err(err) => {
+        log::error!("Failed to send block info reqest to backend: {err:?}");
       }
       _ => (),
     }
@@ -159,9 +175,10 @@ impl BackendState {
         }
         Some(BackendEvent::BlockInfo(block)) => {
           // Check if the block is the newest best.
-          let is_best = block.number() > self.best_block;
+          let number = block.number();
+          let is_best = number > self.best_block;
           if is_best {
-            self.best_block = block.number();
+            self.best_block = number;
           }
 
           // Handle preloading.
@@ -208,9 +225,10 @@ impl BackendState {
                 self.recent_events.push_back(event);
               }
             });
-          // Update recent blocks.
-          let number = block.number();
+          // Update blocks.
+          self.hash_to_number.insert(block.hash, number);
           if self.blocks.insert(number, block).is_none() {
+            // Update recent blocks.
             if is_best {
               self.recent_blocks.push_front(number);
             } else {
@@ -453,7 +471,183 @@ impl SubApp for ChainInfoApp {
 /// Chain Info sub-app.
 #[derive(Default, serde::Deserialize, serde::Serialize)]
 #[serde(default)]
-pub struct BlockDetailsApp {}
+pub struct BlockDetailsApp {
+  last_anchor: String,
+  block_hash: BlockHash,
+  requested: bool,
+}
+
+impl BlockDetailsApp {
+  fn parse_anchor_and_load_block<'a>(
+    &mut self,
+    backend: &'a mut BackendState,
+    anchor: &str,
+  ) -> Result<Option<&'a BlockInfo>, String> {
+    // If the nav `anchor` changed, then update our block hash to display.
+    if self.last_anchor != anchor {
+      if let Some(param) = anchor.strip_prefix(self.anchor()) {
+        if param.starts_with("0x") {
+          // Parse block hash.
+          let hash = hex::decode(&param.as_bytes()[2..]).ok().and_then(|raw| {
+            if raw.len() == BlockHash::len_bytes() {
+              Some(BlockHash::from_slice(raw.as_slice()))
+            } else {
+              None
+            }
+          });
+          match hash {
+            Some(hash) => {
+              self.last_anchor = anchor.to_string();
+              self.block_hash = hash;
+              self.requested = false;
+            }
+            None => {
+              return Err(format!("Failed to parse block hash: {param:?}"));
+            }
+          }
+        } else {
+          return Err(format!("Unsupported block number lookup: {}", param));
+        }
+      } else {
+        return Err(format!("Failed to parse nav anchor: {}", anchor));
+      }
+    }
+    // Check if the block is already loaded.
+    let block = backend
+      .hash_to_number
+      .get(&self.block_hash)
+      .and_then(|number| backend.blocks.get(number));
+    if block.is_some() {
+      // The block is loaded, return it.
+      return Ok(block);
+    }
+    // Need to request the block.
+    if !self.requested {
+      self.requested = true;
+      backend.get_block_info(self.block_hash);
+    }
+    Ok(None)
+  }
+
+  fn block_header_ui(&self, ui: &mut egui::Ui, block: &BlockInfo) -> Option<SubAppEvent> {
+    let mut app_event = None;
+    let width = ui.available_width();
+    ui.set_width(width);
+    let text_height = egui::TextStyle::Body.resolve(ui.style()).size;
+    TableBuilder::new(ui)
+      .striped(true)
+      .cell_layout(egui::Layout::left_to_right().with_cross_align(egui::Align::Center))
+      .column(Size::initial(100.0).at_least(60.0))
+      .column(Size::remainder().at_least(60.0))
+      .column(Size::remainder().at_least(60.0))
+      .column(Size::remainder().at_least(60.0))
+      .column(Size::remainder().at_least(60.0))
+      .resizable(false)
+      .header(20.0, |mut header| {
+        header.col(|ui| {
+          ui.heading("Number");
+        });
+        header.col(|ui| {
+          ui.heading("Hash");
+        });
+        header.col(|ui| {
+          ui.heading("Parent");
+        });
+        header.col(|ui| {
+          ui.heading("Extrinsics");
+        });
+        header.col(|ui| {
+          ui.heading("State");
+        });
+      })
+      .body(|mut body| {
+        body.row(text_height, |mut row| {
+          row.col(|ui| {
+            ui.label(format!("{}", block.number()));
+          });
+          row.col(|ui| {
+            ui.label(format!("{}", block.hash));
+          });
+          row.col(|ui| {
+            if ui.link(format!("{}", block.header.parent_hash)).clicked() {
+              app_event = Some(SubAppEvent::BlockDetails(block.header.parent_hash));
+            }
+          });
+          row.col(|ui| {
+            ui.label(format!("{:?}", block.header.extrinsics_root));
+          });
+          row.col(|ui| {
+            ui.label(format!("{:?}", block.header.state_root));
+          });
+        })
+      });
+    app_event
+  }
+
+  fn block_extrinsics_ui(&self, ui: &mut egui::Ui, block: &BlockInfo) {
+    let width = ui.available_width();
+    ui.set_width(width);
+    let text_height = egui::TextStyle::Body.resolve(ui.style()).size;
+    TableBuilder::new(ui)
+      .striped(true)
+      .cell_layout(egui::Layout::left_to_right().with_cross_align(egui::Align::Center))
+      .column(Size::initial(150.0).at_least(60.0))
+      .column(Size::initial(150.0).at_least(60.0))
+      .column(Size::remainder().at_least(100.0))
+      .resizable(false)
+      .header(20.0, |mut header| {
+        header.col(|ui| {
+          ui.heading("Phase");
+        });
+        header.col(|ui| {
+          ui.heading("Name");
+        });
+        header.col(|ui| {
+          ui.heading("Value");
+        });
+      })
+      .body(|body| {
+        let num_rows = block.events.len();
+        body.rows(text_height, num_rows, |row_index, mut row| {
+          if let Some(event) = block.events.get(row_index) {
+            row.col(|ui| {
+              ui.label(format!("{:?}", event.phase));
+            });
+            row.col(|ui| {
+              ui.label(format!("{}", event.name));
+            });
+            row.col(|ui| {
+              ui.label(format!("{:?}", event.value));
+            });
+          }
+        })
+      });
+  }
+
+  fn show_block_ui(&self, ui: &mut egui::Ui, block: &BlockInfo) -> Option<SubAppEvent> {
+    let mut app_event = None;
+    let width = ui.available_width();
+    ui.set_width(width);
+    let height = ui.available_height();
+    ui.set_height(height);
+    StripBuilder::new(ui)
+      .size(Size::initial(60.0).at_least(40.0)) // Block header
+      .size(Size::remainder()) // Extrinsics.
+      .vertical(|mut strip| {
+        strip.cell(|ui| {
+          ui.push_id("Block Header", |ui| {
+            app_event = self.block_header_ui(ui, block);
+          });
+        });
+        strip.cell(|ui| {
+          ui.push_id("Block Extrinsics", |ui| {
+            self.block_extrinsics_ui(ui, block);
+          });
+        });
+      });
+    app_event
+  }
+}
 
 impl SubApp for BlockDetailsApp {
   fn name(&self) -> &str {
@@ -461,19 +655,31 @@ impl SubApp for BlockDetailsApp {
   }
 
   fn anchor(&self) -> &str {
-    "block_details"
+    "block_details/"
   }
 
   fn update(
     &mut self,
-    _backend: &mut BackendState,
+    backend: &mut BackendState,
     ctx: &egui::Context,
     anchor: &str,
   ) -> Option<SubAppEvent> {
-    egui::CentralPanel::default().show(ctx, |ui| {
-      ui.label(format!("TODO: show block details for: {anchor:?}"));
+    let res = self.parse_anchor_and_load_block(backend, anchor);
+
+    let mut app_event = None;
+    egui::CentralPanel::default().show(ctx, |ui| match res {
+      Ok(block) => {
+        if let Some(block) = block {
+          app_event = self.show_block_ui(ui, block);
+        } else {
+          ui.label(format!("Loading block..."));
+        }
+      }
+      Err(err) => {
+        ui.label(format!("Failed: {err:?}"));
+      }
     });
-    None
+    app_event
   }
 }
 
