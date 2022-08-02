@@ -7,10 +7,10 @@ use serde_json::{to_value, Value};
 pub use polymesh_api::client::*;
 use polymesh_api::*;
 
-#[cfg(target_arch = "wasm32")]
-const PRELOAD_BLOCKS: usize = 5;
 #[cfg(not(target_arch = "wasm32"))]
-const PRELOAD_BLOCKS: usize = 1000;
+use tokio::spawn as spawn_local;
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen_futures::spawn_local;
 
 #[derive(Clone, Debug)]
 pub struct EventInfo {
@@ -70,28 +70,44 @@ impl BlockInfo {
 }
 
 #[derive(Clone, Debug)]
-pub enum UpdateMessage {
+pub enum BackendRequest {
+  ConnectTo(String),
+  GetBlockInfo(BlockHash),
+}
+
+pub type BackendRequestSender = mpsc::Sender<BackendRequest>;
+pub type BackendRequestReceiver = mpsc::Receiver<BackendRequest>;
+
+#[derive(Clone, Debug)]
+pub enum BackendEvent {
   /// Connected(`genesis_hash`, `is_reconnect`)
   Connected {
     genesis: BlockHash,
-    is_reconnect: bool
+    is_reconnect: bool,
   },
-  NewBlock(BlockInfo),
+  NewHeader(Header),
+  BlockInfo(BlockInfo),
 }
 
-pub type UpdateSender = mpsc::Sender<UpdateMessage>;
-pub type UpdateReceiver = mpsc::Receiver<UpdateMessage>;
+pub type BackendEventSender = mpsc::Sender<BackendEvent>;
+pub type BackendEventReceiver = mpsc::Receiver<BackendEvent>;
 
 pub struct Backend {
   url: String,
-  recv: UpdateReceiver,
+  event_rx: BackendEventReceiver,
+  req_tx: BackendRequestSender,
 }
 
 impl Backend {
-  pub fn new(url: &str) -> Self {
+  pub fn new() -> Self {
+    let (event_tx, event_rx) = mpsc::channel(16);
+    let (req_tx, req_rx) = mpsc::channel(16);
+    let inner = SpawnBackend::new(req_rx, event_tx);
+    inner.spawn();
     Self {
-      url: url.to_string(),
-      recv: spawn_backend(url),
+      url: "".into(),
+      event_rx,
+      req_tx,
     }
   }
 
@@ -99,9 +115,24 @@ impl Backend {
     &self.url
   }
 
-  pub fn next_update(&mut self) -> Option<UpdateMessage> {
+  pub fn connect_to(&mut self, url: &str) -> Result<()> {
+    self.url = url.to_string();
+    self
+      .req_tx
+      .blocking_send(BackendRequest::ConnectTo(url.to_string()))?;
+    Ok(())
+  }
+
+  pub fn get_block_info(&mut self, hash: BlockHash) -> Result<()> {
+    self
+      .req_tx
+      .blocking_send(BackendRequest::GetBlockInfo(hash))?;
+    Ok(())
+  }
+
+  pub fn next_update(&mut self) -> Option<BackendEvent> {
     use tokio::sync::mpsc::error::TryRecvError;
-    match self.recv.try_recv() {
+    match self.event_rx.try_recv() {
       Ok(msg) => Some(msg),
       Err(TryRecvError::Empty) => None,
       Err(TryRecvError::Disconnected) => None,
@@ -109,65 +140,109 @@ impl Backend {
   }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
-fn spawn_backend(url: &str) -> UpdateReceiver {
-  let url = url.to_string();
-  let (send, recv) = mpsc::channel(16);
-
-  let rt = tokio::runtime::Builder::new_current_thread()
-    .enable_all()
-    .build()
-    .unwrap();
-
-  std::thread::spawn(move || {
-    rt.block_on(run_backend(&url, send));
-  });
-
-  recv
+pub struct SpawnBackend {
+  event_tx: BackendEventSender,
+  req_rx: BackendRequestReceiver,
 }
 
-#[cfg(target_arch = "wasm32")]
-fn spawn_backend(url: &str) -> UpdateReceiver {
-  let url = url.to_string();
-  let (send, recv) = mpsc::channel(16);
+impl SpawnBackend {
+  fn new(req_rx: BackendRequestReceiver, event_tx: BackendEventSender) -> Self {
+    Self { req_rx, event_tx }
+  }
 
-  wasm_bindgen_futures::spawn_local(run_backend(&url, send));
+  #[cfg(not(target_arch = "wasm32"))]
+  fn spawn(self) {
+    let rt = tokio::runtime::Builder::new_current_thread()
+      .enable_all()
+      .build()
+      .unwrap();
 
-  recv
-}
+    std::thread::spawn(move || {
+      rt.block_on(self.run_backend());
+    });
+  }
 
-async fn run_backend(url: &str, send: UpdateSender) {
-  match InnerBackend::start(url, send).await {
-    Ok(_) => {
-      log::info!("backend stopped.");
-    }
-    Err(err) => {
-      log::error!("backend failed to start: {err:?}");
+  #[cfg(target_arch = "wasm32")]
+  fn spawn(self) {
+    wasm_bindgen_futures::spawn_local(self.run_backend());
+  }
+
+  async fn run_backend(self) {
+    let Self {
+      event_tx,
+      mut req_rx,
+    } = self;
+    // Wait for url from frontend.
+    while let Some(req) = req_rx.recv().await {
+      match req {
+        BackendRequest::ConnectTo(url) => {
+          log::info!("Backend connect to: {url:?}");
+          let api = match Api::new(&url).await {
+            Ok(api) => api,
+            Err(err) => {
+              log::error!("Failed to connect to backend: {err:?}");
+              continue;
+            }
+          };
+
+          match InnerBackend::start(api, req_rx, event_tx).await {
+            Ok(_) => {
+              log::info!("backend stopped.");
+            }
+            Err(err) => {
+              log::error!("backend failed to start: {err:?}");
+            }
+          }
+          break;
+        }
+        req => {
+          log::error!("Backend not started yet: {req:?}");
+        }
+      }
     }
   }
 }
 
 pub struct InnerBackend {
   api: Api,
-  send: UpdateSender,
+  event_tx: BackendEventSender,
+  req_rx: BackendRequestReceiver,
   auto_reconnect: bool,
 }
 
 impl InnerBackend {
-  async fn start(url: &str, send: UpdateSender) -> Result<()> {
-    log::info!("Backend connect to: {url:?}");
-    let api = Api::new(url).await?;
-    let inner = Self {
+  async fn start(
+    api: Api,
+    req_rx: BackendRequestReceiver,
+    event_tx: BackendEventSender,
+  ) -> Result<()> {
+    let mut inner = Self {
       api,
-      send,
+      event_tx,
+      req_rx,
       auto_reconnect: true,
     };
-    inner.run().await;
+    // First connect.
+    let mut is_reconnect = false;
+
+    while inner.auto_reconnect {
+      match inner.run(is_reconnect).await {
+        Ok(true) => (),
+        Ok(false) => {
+          // Exit.
+          break;
+        }
+        Err(err) => {
+          log::error!("{err:?}");
+        }
+      }
+      is_reconnect = true;
+    }
     Ok(())
   }
 
-  async fn send(&mut self, msg: UpdateMessage) -> Result<()> {
-    let res = self.send.send(msg).await;
+  async fn send(&mut self, msg: BackendEvent) -> Result<()> {
+    let res = self.event_tx.send(msg).await;
     if res.is_err() {
       // Frontend closed channel, need to shutdown.
       self.auto_reconnect = false;
@@ -191,69 +266,89 @@ impl InnerBackend {
       header,
       events,
     };
-    self.send(UpdateMessage::NewBlock(block)).await?;
+    self.send(BackendEvent::BlockInfo(block)).await?;
     Ok(())
   }
 
-  async fn run(mut self) {
-    // First connect.
-    let mut is_reconnect = false;
+  async fn get_block_hash(&self, number: BlockNumber) -> Result<BlockHash> {
+    Ok(self.api.client().get_block_hash(number).await?)
+  }
 
-    while self.auto_reconnect {
-      match self.wait_for_blocks(is_reconnect).await {
-        Ok(_) => (),
-        Err(err) => {
-          log::error!("{err:?}");
-        }
-      }
-      is_reconnect = true;
-    }
+  async fn get_block_header(&self, hash: Option<BlockHash>) -> Result<Option<Header>> {
+    Ok(self.api.client().get_block_header(hash).await?)
   }
 
   async fn connected(&mut self, is_reconnect: bool) -> Result<()> {
-    let genesis = self.api.client().get_block_hash(0).await?;
-    self.send(UpdateMessage::Connected { genesis, is_reconnect }).await?;
+    let genesis = self.get_block_hash(0).await?;
+    self
+      .send(BackendEvent::Connected {
+        genesis,
+        is_reconnect,
+      })
+      .await?;
     Ok(())
   }
 
-  async fn wait_for_blocks(&mut self, is_reconnect: bool) -> Result<()> {
+  async fn run(&mut self, is_reconnect: bool) -> Result<bool> {
     self.connected(is_reconnect).await?;
 
     let client = self.api.client();
 
-    let mut sub_blocks = client.subscribe_blocks().await?;
+    // Spawn background watcher for new blocks.
+    let sub_blocks = client.subscribe_blocks().await?;
+    HeaderWatcher::spawn(sub_blocks, self.event_tx.clone());
 
-    let mut last_block_number = 0;
-    // Grab the last X blocks.
-    if let Some(current) = client.get_block_header(None).await? {
-      let mut parent = current.parent_hash;
-      let mut headers = Vec::new();
-      headers.push(current);
-      for _ in 0..PRELOAD_BLOCKS {
-        match client.get_block_header(Some(parent)).await? {
-          Some(header) => {
-            parent = header.parent_hash;
-            headers.push(header);
-          }
-          None => {
-            break;
-          }
+    // Grab and push the current block.
+    if let Some(current) = self.get_block_header(None).await? {
+      self.push_block(current).await?;
+    }
+
+    // Process requests from frontend.
+    while let Some(req) = self.req_rx.recv().await {
+      match req {
+        BackendRequest::ConnectTo(url) => {
+          // Reconnect and restart.
+          self.api = Api::new(&url).await?;
+          return Ok(true);
         }
-      }
-
-      for header in headers.into_iter().rev() {
-        last_block_number = header.number;
-        self.push_block(header).await?;
+        BackendRequest::GetBlockInfo(hash) => match self.get_block_header(Some(hash)).await? {
+          Some(header) => {
+            self.push_block(header).await?;
+          }
+          None => (),
+        },
       }
     }
 
-    while let Some(header) = sub_blocks.next().await.transpose()? {
+    Ok(false)
+  }
+}
+
+pub struct HeaderWatcher {
+  sub: Subscription<Header>,
+  event_tx: BackendEventSender,
+}
+
+impl HeaderWatcher {
+  fn spawn(sub: Subscription<Header>, event_tx: BackendEventSender) {
+    let watcher = Self { sub, event_tx };
+    spawn_local(watcher.start());
+  }
+
+  async fn start(self) {
+    match self.run().await {
+      Err(err) => {
+        log::error!("HeaderWatcher: {err:?}");
+      }
+      Ok(_) => (),
+    }
+  }
+
+  async fn run(mut self) -> Result<()> {
+    while let Some(header) = self.sub.next().await.transpose()? {
       //log::info!("{}: {}", header.number, header.hash());
-      if header.number > last_block_number {
-        self.push_block(header).await?;
-      }
+      self.event_tx.send(BackendEvent::NewHeader(header)).await?;
     }
-
     Ok(())
   }
 }

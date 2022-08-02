@@ -9,6 +9,11 @@ const MAX_BACKEND_UPDATES: usize = 100;
 const MAX_RECENT_BLOCKS: usize = 2000;
 const MAX_RECENT_EVENTS: usize = 2000;
 
+#[cfg(target_arch = "wasm32")]
+const PRELOAD_BLOCKS: u32 = 20;
+#[cfg(not(target_arch = "wasm32"))]
+const PRELOAD_BLOCKS: u32 = 1000;
+
 #[derive(Debug)]
 pub struct BlockEventSummary {
   pub block: BlockNumber,
@@ -32,13 +37,21 @@ pub struct BackendState {
   genesis_hash: Option<BlockHash>,
 
   #[serde(skip)]
+  preload_blocks: u32,
+  #[serde(skip)]
+  preload_next: Option<BlockHash>,
+
+  #[serde(skip)]
+  best_block: BlockNumber,
+
+  #[serde(skip)]
   blocks: HashMap<BlockNumber, BlockInfo>,
   #[serde(skip)]
   recent_blocks: VecDeque<BlockNumber>,
   #[serde(skip)]
   recent_events: VecDeque<BlockEventSummary>,
   #[serde(skip)]
-  backend: Option<Backend>,
+  backend: Backend,
 }
 
 impl Default for BackendState {
@@ -48,10 +61,13 @@ impl Default for BackendState {
       need_save: true,
       url: POLYMESH_STAGING.to_owned(),
       genesis_hash: None,
+      best_block: 0,
+      preload_blocks: PRELOAD_BLOCKS as u32,
+      preload_next: None,
       blocks: Default::default(),
       recent_blocks: Default::default(),
       recent_events: Default::default(),
-      backend: None,
+      backend: Backend::new(),
     }
   }
 }
@@ -60,26 +76,26 @@ impl BackendState {
   fn clear(&mut self) {
     self.genesis_hash = None;
     self.blocks.clear();
+    self.best_block = 0;
+    self.recent_blocks.clear();
     self.recent_events.clear();
+    self.preload_blocks = PRELOAD_BLOCKS;
+    self.preload_next = None;
   }
 
-  pub fn restart_backend(&mut self) {
-    if self.backend.is_some() {
-      log::info!("Reconnect to backend.");
-    } else {
-      log::info!("Connect to backend.");
+  fn connect(&mut self) {
+    match self.backend.connect_to(&self.url) {
+      Err(err) => {
+        log::error!("Failed to send ConnectTo reqest to backend: {err:?}");
+      }
+      _ => (),
     }
-    self.clear();
-    self.backend = Some(Backend::new(&self.url));
   }
 
   fn check_node_url(&mut self) {
-    let backend_url = self.backend.as_ref().map(|b| b.get_url());
-    if let Some(backend_url) = backend_url {
-      if backend_url != self.url {
-        log::info!("Node url changed.  Reconnect to backend.");
-        self.restart_backend();
-      }
+    if self.backend.get_url() != self.url {
+      log::info!("Node url changed.  Reconnect to backend.");
+      self.connect();
     }
   }
 
@@ -94,90 +110,129 @@ impl BackendState {
     }
   }
 
-  pub fn backend_updates(&mut self) {
-    let mut need_clear = false;
-    if let Some(ref mut backend) = &mut self.backend {
-      // Poll the backend for updates.
-      for _ in 0..MAX_BACKEND_UPDATES {
-        match backend.next_update() {
-          Some(UpdateMessage::Connected {
-            genesis,
-            is_reconnect,
-          }) => {
-            log::info!("Connected to backend: {genesis:?}, is_reconnect={is_reconnect}");
-            if is_reconnect {
-              // Check if the chain is the same.
-              if self.genesis_hash != Some(genesis) {
-                log::info!("---- Different genesis hash clear chain state.");
-                // Clear old chain data.
-                need_clear = true;
-              }
-            }
-            self.genesis_hash = Some(genesis);
-          }
-          Some(UpdateMessage::NewBlock(block)) => {
-            // Update recent events.
-            block
-              .events
-              .iter()
-              .fold(
-                HashMap::new(),
-                |mut events: HashMap<(_, _), BlockEventSummary>, event| {
-                  use std::collections::hash_map::Entry;
-                  // Ignore some common events.
-                  if event.name.starts_with("System.") {
-                    return events;
-                  }
-
-                  let key = (event.block, &event.name);
-                  match events.entry(key) {
-                    Entry::Occupied(entry) => {
-                      // Duplicate event type, just bump the count.
-                      entry.into_mut().count += 1;
-                    }
-                    Entry::Vacant(entry) => {
-                      // New event type.
-                      entry.insert(BlockEventSummary {
-                        block: event.block,
-                        number: event.number,
-                        name: event.name.clone(),
-                        count: 1,
-                      });
-                    }
-                  }
-
-                  events
-                },
-              )
-              .into_iter()
-              .for_each(|(_, event)| {
-                self.recent_events.push_front(event);
-              });
-            // Update recent blocks.
-            let number = block.number();
-            if self.blocks.insert(number, block).is_none() {
-              self.recent_blocks.push_front(number);
-            }
-            // Trim old events.
-            while self.recent_events.len() > MAX_RECENT_EVENTS {
-              self.recent_events.pop_back();
-            }
-            // Trim old blocks.
-            while self.recent_blocks.len() > MAX_RECENT_BLOCKS {
-              if let Some(number) = self.recent_blocks.pop_back() {
-                self.blocks.remove(&number);
-              }
-            }
-          }
-          None => {
-            // Channel is empty.
-            break;
-          }
-        }
+  fn next_preload(&mut self, block: &BlockInfo) {
+    // Check if we are still preloading.
+    if self.preload_blocks == 0 {
+      return;
+    }
+    // Make sure it was our last requested block.
+    if let Some(next) = &self.preload_next {
+      if next != &block.hash {
+        return;
       }
     }
-    if need_clear {
-      self.clear();
+    // Preload parent block.
+    self.preload_blocks -= 1;
+    let hash = block.header.parent_hash;
+    self.preload_next = Some(hash);
+    match self.backend.get_block_info(hash) {
+      Err(err) => log::error!("Backend error: {err:?}"),
+      _ => (),
+    }
+  }
+
+  pub fn backend_updates(&mut self) {
+    // Poll the backend for updates.
+    for _ in 0..MAX_BACKEND_UPDATES {
+      match self.backend.next_update() {
+        Some(BackendEvent::Connected {
+          genesis,
+          is_reconnect,
+        }) => {
+          log::info!("Connected to backend: {genesis:?}, is_reconnect={is_reconnect}");
+          if is_reconnect {
+            // Check if the chain is the same.
+            if self.genesis_hash != Some(genesis) {
+              log::info!("---- Different genesis hash clear chain state.");
+              // Clear old chain data.
+              self.clear();
+            }
+          }
+          self.genesis_hash = Some(genesis);
+        }
+        Some(BackendEvent::NewHeader(header)) => {
+          // New block header.  Request block info.
+          match self.backend.get_block_info(header.hash()) {
+            Err(err) => log::error!("Backend error: {err:?}"),
+            _ => (),
+          }
+        }
+        Some(BackendEvent::BlockInfo(block)) => {
+          // Check if the block is the newest best.
+          let is_best = block.number() > self.best_block;
+          if is_best {
+            self.best_block = block.number();
+          }
+
+          // Handle preloading.
+          self.next_preload(&block);
+
+          // Update recent events.
+          block
+            .events
+            .iter()
+            .fold(
+              HashMap::new(),
+              |mut events: HashMap<(_, _), BlockEventSummary>, event| {
+                use std::collections::hash_map::Entry;
+                // Ignore some common events.
+                if event.name.starts_with("System.") {
+                  return events;
+                }
+
+                let key = (event.block, &event.name);
+                match events.entry(key) {
+                  Entry::Occupied(entry) => {
+                    // Duplicate event type, just bump the count.
+                    entry.into_mut().count += 1;
+                  }
+                  Entry::Vacant(entry) => {
+                    // New event type.
+                    entry.insert(BlockEventSummary {
+                      block: event.block,
+                      number: event.number,
+                      name: event.name.clone(),
+                      count: 1,
+                    });
+                  }
+                }
+
+                events
+              },
+            )
+            .into_iter()
+            .for_each(|(_, event)| {
+              if is_best {
+                self.recent_events.push_front(event);
+              } else {
+                self.recent_events.push_back(event);
+              }
+            });
+          // Update recent blocks.
+          let number = block.number();
+          if self.blocks.insert(number, block).is_none() {
+            if is_best {
+              self.recent_blocks.push_front(number);
+            } else {
+              self.recent_blocks.push_back(number);
+            }
+          }
+          // Trim old events.
+          while self.recent_events.len() > MAX_RECENT_EVENTS {
+            self.recent_events.pop_back();
+          }
+          // Trim old blocks.
+          while self.recent_blocks.len() > MAX_RECENT_BLOCKS {
+            if let Some(number) = self.recent_blocks.pop_back() {
+              self.blocks.remove(&number);
+            }
+          }
+        }
+        None => {
+          // Channel is empty.
+          break;
+        }
+      }
     }
   }
 
@@ -244,10 +299,27 @@ pub trait SubApp {
 /// Chain Info sub-app.
 #[derive(Default, serde::Deserialize, serde::Serialize)]
 #[serde(default)]
-pub struct ChainInfoApp {}
+pub struct ChainInfoApp {
+  #[serde(skip)]
+  reset_scroll: bool,
+}
 
 impl ChainInfoApp {
-  fn recent_blocks_ui(&self, backend: &mut BackendState, ui: &mut egui::Ui) -> Option<SubAppEvent> {
+  // HACK(egui): Validate `row_range`.  `egui::ScrollArea` can give an invalid row range.
+  fn validate_range(&mut self, max: usize, range: &std::ops::Range<usize>) -> bool {
+    if range.start > range.end || range.end > max {
+      self.reset_scroll = true;
+      false
+    } else {
+      true
+    }
+  }
+
+  fn recent_blocks_ui(
+    &mut self,
+    backend: &mut BackendState,
+    ui: &mut egui::Ui,
+  ) -> Option<SubAppEvent> {
     let mut app_event = None;
     ui.label("Recent blocks:");
     ui.separator();
@@ -256,27 +328,34 @@ impl ChainInfoApp {
       let text_style = TextStyle::Body;
       let row_height = ui.text_style_height(&text_style);
       let num_rows = blocks.len();
-      ScrollArea::vertical().auto_shrink([false; 2]).show_rows(
-        ui,
-        row_height,
-        num_rows,
-        |ui, row_range| {
-          for number in blocks.range(row_range) {
-            let block = backend.blocks.get(number).unwrap();
-            ui.horizontal(|ui| {
-              if ui.link(format!("{}", block.number())).clicked() {
-                app_event = Some(SubAppEvent::BlockDetails(block.hash));
-              }
-              ui.label(format!("{:?}", block.hash));
-            });
-          }
-        },
-      );
+      let mut scroll = ScrollArea::vertical().auto_shrink([false; 2]);
+      if self.reset_scroll {
+        scroll = scroll.vertical_scroll_offset(0.0);
+      }
+      scroll.show_rows(ui, row_height, num_rows, |ui, row_range| {
+        if !self.validate_range(num_rows, &row_range) {
+          return;
+        }
+
+        for number in blocks.range(row_range) {
+          let block = backend.blocks.get(number).unwrap();
+          ui.horizontal(|ui| {
+            if ui.link(format!("{}", block.number())).clicked() {
+              app_event = Some(SubAppEvent::BlockDetails(block.hash));
+            }
+            ui.label(format!("{:?}", block.hash));
+          });
+        }
+      });
     });
     app_event
   }
 
-  fn recent_events_ui(&self, backend: &mut BackendState, ui: &mut egui::Ui) -> Option<SubAppEvent> {
+  fn recent_events_ui(
+    &mut self,
+    backend: &mut BackendState,
+    ui: &mut egui::Ui,
+  ) -> Option<SubAppEvent> {
     let mut app_event = None;
     ui.label("Recent events:");
     ui.separator();
@@ -285,31 +364,35 @@ impl ChainInfoApp {
       let text_style = TextStyle::Body;
       let row_height = ui.text_style_height(&text_style);
       let num_rows = events.len();
-      ScrollArea::vertical().auto_shrink([false; 2]).show_rows(
-        ui,
-        row_height,
-        num_rows,
-        |ui, row_range| {
-          for event in events.range(row_range) {
-            ui.horizontal(|ui| {
-              ui.label(format!("{}", event.name));
-              ui.with_layout(egui::Layout::right_to_left(), |ui| {
-                if ui
-                  .link(format!("{}-{}", event.block, event.number))
-                  .clicked()
-                {
-                  if let Some(block) = backend.blocks.get(&event.block) {
-                    app_event = Some(SubAppEvent::BlockDetails(block.hash));
-                  }
+      let mut scroll = ScrollArea::vertical().auto_shrink([false; 2]);
+      if self.reset_scroll {
+        scroll = scroll.vertical_scroll_offset(0.0);
+      }
+      self.reset_scroll = false;
+      scroll.show_rows(ui, row_height, num_rows, |ui, row_range| {
+        if !self.validate_range(num_rows, &row_range) {
+          return;
+        }
+
+        for event in events.range(row_range) {
+          ui.horizontal(|ui| {
+            ui.label(format!("{}", event.name));
+            ui.with_layout(egui::Layout::right_to_left(), |ui| {
+              if ui
+                .link(format!("{}-{}", event.block, event.number))
+                .clicked()
+              {
+                if let Some(block) = backend.blocks.get(&event.block) {
+                  app_event = Some(SubAppEvent::BlockDetails(block.hash));
                 }
-                if event.count > 1 {
-                  ui.label(format!("({}x)", event.count));
-                }
-              });
+              }
+              if event.count > 1 {
+                ui.label(format!("({}x)", event.count));
+              }
             });
-          }
-        },
-      );
+          });
+        }
+      });
     });
     app_event
   }
@@ -468,7 +551,7 @@ impl PolymeshApp {
 
     cc.egui_ctx.set_visuals(egui::Visuals::dark());
 
-    app.backend.restart_backend();
+    app.backend.connect();
 
     app
   }
