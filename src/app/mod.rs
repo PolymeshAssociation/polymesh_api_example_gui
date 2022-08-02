@@ -6,6 +6,8 @@ use crate::backend::*;
 
 const POLYMESH_STAGING: &str = "wss://staging-rpc.polymesh.live";
 const MAX_BACKEND_UPDATES: usize = 100;
+const MAX_RECENT_BLOCKS: usize = 2000;
+const MAX_RECENT_EVENTS: usize = 2000;
 
 #[derive(Debug)]
 pub struct BlockEventSummary {
@@ -27,6 +29,9 @@ pub struct BackendState {
   need_save: bool,
 
   #[serde(skip)]
+  genesis_hash: Option<BlockHash>,
+
+  #[serde(skip)]
   blocks: HashMap<BlockNumber, BlockInfo>,
   #[serde(skip)]
   recent_blocks: VecDeque<BlockNumber>,
@@ -42,6 +47,7 @@ impl Default for BackendState {
       open: true,
       need_save: true,
       url: POLYMESH_STAGING.to_owned(),
+      genesis_hash: None,
       blocks: Default::default(),
       recent_blocks: Default::default(),
       recent_events: Default::default(),
@@ -52,6 +58,7 @@ impl Default for BackendState {
 
 impl BackendState {
   fn clear(&mut self) {
+    self.genesis_hash = None;
     self.blocks.clear();
     self.recent_events.clear();
   }
@@ -88,10 +95,26 @@ impl BackendState {
   }
 
   pub fn backend_updates(&mut self) {
+    let mut need_clear = false;
     if let Some(ref mut backend) = &mut self.backend {
       // Poll the backend for updates.
       for _ in 0..MAX_BACKEND_UPDATES {
         match backend.next_update() {
+          Some(UpdateMessage::Connected {
+            genesis,
+            is_reconnect,
+          }) => {
+            log::info!("Connected to backend: {genesis:?}, is_reconnect={is_reconnect}");
+            if is_reconnect {
+              // Check if the chain is the same.
+              if self.genesis_hash != Some(genesis) {
+                log::info!("---- Different genesis hash clear chain state.");
+                // Clear old chain data.
+                need_clear = true;
+              }
+            }
+            self.genesis_hash = Some(genesis);
+          }
           Some(UpdateMessage::NewBlock(block)) => {
             // Update recent events.
             block
@@ -128,20 +151,23 @@ impl BackendState {
               )
               .into_iter()
               .for_each(|(_, event)| {
-                if self.recent_events.len() > 1000 {
-                  self.recent_events.pop_back();
-                }
                 self.recent_events.push_front(event);
               });
             // Update recent blocks.
-            if self.recent_blocks.len() > 1000 {
+            let number = block.number();
+            if self.blocks.insert(number, block).is_none() {
+              self.recent_blocks.push_front(number);
+            }
+            // Trim old events.
+            while self.recent_events.len() > MAX_RECENT_EVENTS {
+              self.recent_events.pop_back();
+            }
+            // Trim old blocks.
+            while self.recent_blocks.len() > MAX_RECENT_BLOCKS {
               if let Some(number) = self.recent_blocks.pop_back() {
                 self.blocks.remove(&number);
               }
             }
-            let number = block.number();
-            self.recent_blocks.push_front(number);
-            self.blocks.insert(number, block);
           }
           None => {
             // Channel is empty.
@@ -149,6 +175,9 @@ impl BackendState {
           }
         }
       }
+    }
+    if need_clear {
+      self.clear();
     }
   }
 

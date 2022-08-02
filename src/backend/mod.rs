@@ -71,6 +71,11 @@ impl BlockInfo {
 
 #[derive(Clone, Debug)]
 pub enum UpdateMessage {
+  /// Connected(`genesis_hash`, `is_reconnect`)
+  Connected {
+    genesis: BlockHash,
+    is_reconnect: bool
+  },
   NewBlock(BlockInfo),
 }
 
@@ -115,10 +120,7 @@ fn spawn_backend(url: &str) -> UpdateReceiver {
     .unwrap();
 
   std::thread::spawn(move || {
-    rt.block_on(async {
-      let res = run_backend(&url, send).await;
-      log::info!("backend stopped: {:?}", res);
-    });
+    rt.block_on(run_backend(&url, send));
   });
 
   recv
@@ -129,33 +131,51 @@ fn spawn_backend(url: &str) -> UpdateReceiver {
   let url = url.to_string();
   let (send, recv) = mpsc::channel(16);
 
-  wasm_bindgen_futures::spawn_local(async move {
-    let res = run_backend(&url, send).await;
-    log::info!("backend stopped: {:?}", res);
-  });
+  wasm_bindgen_futures::spawn_local(run_backend(&url, send));
 
   recv
 }
 
-async fn run_backend(url: &str, send: UpdateSender) -> Result<()> {
-  InnerBackend::start(url, send).await
+async fn run_backend(url: &str, send: UpdateSender) {
+  match InnerBackend::start(url, send).await {
+    Ok(_) => {
+      log::info!("backend stopped.");
+    }
+    Err(err) => {
+      log::error!("backend failed to start: {err:?}");
+    }
+  }
 }
 
 pub struct InnerBackend {
   api: Api,
   send: UpdateSender,
+  auto_reconnect: bool,
 }
 
 impl InnerBackend {
   async fn start(url: &str, send: UpdateSender) -> Result<()> {
     log::info!("Backend connect to: {url:?}");
     let api = Api::new(url).await?;
-    let inner = Self { api, send };
-    inner.run().await?;
+    let inner = Self {
+      api,
+      send,
+      auto_reconnect: true,
+    };
+    inner.run().await;
     Ok(())
   }
 
-  async fn push_block(&self, header: Header) -> Result<()> {
+  async fn send(&mut self, msg: UpdateMessage) -> Result<()> {
+    let res = self.send.send(msg).await;
+    if res.is_err() {
+      // Frontend closed channel, need to shutdown.
+      self.auto_reconnect = false;
+    }
+    res.map_err(|e| e.into())
+  }
+
+  async fn push_block(&mut self, header: Header) -> Result<()> {
     let hash = header.hash();
     // Get block events.
     let events = self
@@ -171,11 +191,34 @@ impl InnerBackend {
       header,
       events,
     };
-    self.send.send(UpdateMessage::NewBlock(block)).await?;
+    self.send(UpdateMessage::NewBlock(block)).await?;
     Ok(())
   }
 
-  async fn run(self) -> Result<()> {
+  async fn run(mut self) {
+    // First connect.
+    let mut is_reconnect = false;
+
+    while self.auto_reconnect {
+      match self.wait_for_blocks(is_reconnect).await {
+        Ok(_) => (),
+        Err(err) => {
+          log::error!("{err:?}");
+        }
+      }
+      is_reconnect = true;
+    }
+  }
+
+  async fn connected(&mut self, is_reconnect: bool) -> Result<()> {
+    let genesis = self.api.client().get_block_hash(0).await?;
+    self.send(UpdateMessage::Connected { genesis, is_reconnect }).await?;
+    Ok(())
+  }
+
+  async fn wait_for_blocks(&mut self, is_reconnect: bool) -> Result<()> {
+    self.connected(is_reconnect).await?;
+
     let client = self.api.client();
 
     let mut sub_blocks = client.subscribe_blocks().await?;
