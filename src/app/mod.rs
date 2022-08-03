@@ -19,7 +19,7 @@ const PRELOAD_BLOCKS: u32 = 1000;
 pub struct BlockEventSummary {
   pub block: BlockNumber,
   pub number: u32,
-  pub name: String,
+  pub name: &'static str,
   /// Count the number of events in the block with the same type.
   pub count: u32,
 }
@@ -208,7 +208,7 @@ impl BackendState {
                     entry.insert(BlockEventSummary {
                       block: event.block,
                       number: event.number,
-                      name: event.name.clone(),
+                      name: event.name,
                       count: 1,
                     });
                   }

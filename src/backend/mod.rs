@@ -17,7 +17,7 @@ pub struct EventInfo {
   pub block: BlockNumber,
   pub number: u32,
   pub phase: Phase,
-  pub name: String,
+  pub name: &'static str,
   pub value: Value,
 }
 
@@ -28,24 +28,31 @@ impl EventInfo {
     event: EventRecord<<Api as ChainApi>::RuntimeEvent>,
   ) -> Self {
     let phase = event.phase;
-    let (name, value) = match to_value(event.event) {
-      Err(err) => (format!("Unknown event: {err:?}"), Value::Null),
+    let value = match to_value(&event.event) {
+      Err(err) => {
+        log::error!("Unknown event: {err:?}");
+        Value::Null
+      }
       Ok(Value::Object(map)) if map.len() == 1 => {
         let (mod_name, event) = map.into_iter().next().unwrap();
         match event {
           Value::Object(map) if map.len() == 1 => {
-            let (name, value) = map.into_iter().next().unwrap();
-            (format!("{mod_name}.{name}"), value)
+            let (_, value) = map.into_iter().next().unwrap();
+            value
           }
-          Value::String(name) => (format!("{mod_name}.{name}"), Value::Null),
-          event => (
-            format!("Invalid {mod_name} event type: {:?}.", event),
-            event,
-          ),
+          Value::String(_) => Value::Null,
+          event => {
+            log::error!("Invalid {mod_name} event type: {:?}.", event);
+            event
+          }
         }
       }
-      Ok(event) => (format!("Invalid runtime event type."), event),
+      Ok(event) => {
+        format!("Invalid runtime event type.");
+        event
+      },
     };
+    let name = event.event.into();
     Self {
       block,
       number,
