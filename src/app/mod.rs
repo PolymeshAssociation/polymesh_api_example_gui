@@ -468,12 +468,21 @@ impl SubApp for ChainInfoApp {
   }
 }
 
+/// Selected block
+#[derive(Default, serde::Deserialize, serde::Serialize)]
+pub enum SelectedBlock {
+  Hash(BlockHash),
+  Number(BlockNumber),
+  #[default]
+  Best,
+}
+
 /// Chain Info sub-app.
 #[derive(Default, serde::Deserialize, serde::Serialize)]
 #[serde(default)]
 pub struct BlockDetailsApp {
   last_anchor: String,
-  block_hash: BlockHash,
+  selected_block: SelectedBlock,
   requested: bool,
 }
 
@@ -488,8 +497,7 @@ impl BlockDetailsApp {
       self.last_anchor = anchor.to_string();
       if let Some(param) = anchor.strip_prefix(self.anchor()) {
         if param.len() == 0 {
-          let number = backend.best_block;
-          return Ok(backend.blocks.get(&number));
+          self.selected_block = SelectedBlock::Best;
         } else if param.starts_with("0x") {
           // Parse block hash.
           let hash = hex::decode(&param.as_bytes()[2..]).ok().and_then(|raw| {
@@ -501,7 +509,7 @@ impl BlockDetailsApp {
           });
           match hash {
             Some(hash) => {
-              self.block_hash = hash;
+              self.selected_block = SelectedBlock::Hash(hash);
               self.requested = false;
             }
             None => {
@@ -515,21 +523,32 @@ impl BlockDetailsApp {
         return Err(format!("Failed to parse nav anchor: {}", anchor));
       }
     }
-    // Check if the block is already loaded.
-    let block = backend
-      .hash_to_number
-      .get(&self.block_hash)
-      .and_then(|number| backend.blocks.get(number));
-    if block.is_some() {
-      // The block is loaded, return it.
-      return Ok(block);
-    }
-    // Need to request the block.
-    if !self.requested {
-      self.requested = true;
-      backend.get_block_info(self.block_hash);
-    }
-    Ok(None)
+
+    Ok(match &self.selected_block {
+      SelectedBlock::Hash(hash) => {
+        // Check if the block is already loaded.
+        let block = backend
+          .hash_to_number
+          .get(hash)
+          .and_then(|number| backend.blocks.get(number));
+        if block.is_some() {
+          // The block is loaded, return it.
+          block
+        } else {
+          // Need to request the block.
+          if !self.requested {
+            self.requested = true;
+            backend.get_block_info(*hash);
+          }
+          None
+        }
+      }
+      SelectedBlock::Number(number) => backend.blocks.get(number),
+      SelectedBlock::Best => {
+        let number = backend.best_block;
+        backend.blocks.get(&number)
+      }
+    })
   }
 
   fn block_header_ui(&self, ui: &mut egui::Ui, block: &BlockInfo) -> Option<SubAppEvent> {

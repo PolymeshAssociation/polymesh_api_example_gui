@@ -50,7 +50,7 @@ impl EventInfo {
       Ok(event) => {
         format!("Invalid runtime event type.");
         event
-      },
+      }
     };
     let name = event.event.into();
     Self {
