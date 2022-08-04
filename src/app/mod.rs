@@ -485,8 +485,12 @@ impl BlockDetailsApp {
   ) -> Result<Option<&'a BlockInfo>, String> {
     // If the nav `anchor` changed, then update our block hash to display.
     if self.last_anchor != anchor {
+      self.last_anchor = anchor.to_string();
       if let Some(param) = anchor.strip_prefix(self.anchor()) {
-        if param.starts_with("0x") {
+        if param.len() == 0 {
+          let number = backend.best_block;
+          return Ok(backend.blocks.get(&number));
+        } else if param.starts_with("0x") {
           // Parse block hash.
           let hash = hex::decode(&param.as_bytes()[2..]).ok().and_then(|raw| {
             if raw.len() == BlockHash::len_bytes() {
@@ -497,7 +501,6 @@ impl BlockDetailsApp {
           });
           match hash {
             Some(hash) => {
-              self.last_anchor = anchor.to_string();
               self.block_hash = hash;
               self.requested = false;
             }
