@@ -639,7 +639,7 @@ impl BlockDetailsApp {
               ui.label(format!("{}", event.name));
             });
             row.col(|ui| {
-              ui.label(format!("{:?}", event.value));
+              ui.label(format!("{:?}", serde_json::to_string(&event.value)));
             });
           }
         })

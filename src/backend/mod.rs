@@ -27,6 +27,7 @@ impl EventInfo {
     number: u32,
     event: EventRecord<<Api as ChainApi>::RuntimeEvent>,
   ) -> Self {
+    let name = event.name();
     let phase = event.phase;
     let value = match to_value(&event.event) {
       Err(err) => {
@@ -52,7 +53,6 @@ impl EventInfo {
         event
       }
     };
-    let name = event.event.into();
     Self {
       block,
       number,
