@@ -90,9 +90,9 @@ dependencies = [
 
 [[package]]
 name = "anyhow"
-version = "1.0.60"
+version = "1.0.61"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c794e162a5eff65c72ef524dfe393eb923c354e350bb78b9c7383df13f3bc142"
+checksum = "508b352bb5c066aac251f6daf6b36eccd03e8a88e8081cd44959ea277a3af9a8"
 
 [[package]]
 name = "arboard"
@@ -1463,9 +1463,9 @@ dependencies = [
 
 [[package]]
 name = "iana-time-zone"
-version = "0.1.41"
+version = "0.1.42"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1779539f58004e5dba1c1f093d44325ebeb244bfc04b791acdc0aaeca9c04570"
+checksum = "9512e544c25736b82aebbd2bf739a47c8a1c935dfcc3a6adcde10e35cd3cd468"
 dependencies = [
  "android_system_properties",
  "core-foundation 0.9.3",
@@ -1729,9 +1729,9 @@ checksum = "e2abad23fbc42b3700f2f279844dc832adb2b2eb069b2df918f455c4e18cc646"
 
 [[package]]
 name = "libc"
-version = "0.2.128"
+version = "0.2.129"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "95f2a930906a03d4ee59113b31586c057c94f4d40c9fe90f21597a8b6822bfd8"
+checksum = "64de3cc433455c14174d42e554d4027ee631c4d046d43e3ecc6efc4636cdc7a7"
 
 [[package]]
 name = "libloading"
@@ -2379,6 +2379,8 @@ checksum = "1df8c4ec4b0627e53bdf214615ad287367e482558cf84b109250b37464dc03ae"
 [[package]]
 name = "polymesh-api"
 version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2e61663182ff98e0a62693fa0c3dbd2c98aa5c1896d82d8663c699086f452147"
 dependencies = [
  "async-trait",
  "lazy_static",
@@ -2396,6 +2398,8 @@ dependencies = [
 [[package]]
 name = "polymesh-api-client"
 version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6b75d817b9206eeed86652dcee67572fa747cce7451dbf6fba3ccc2120db069a"
 dependencies = [
  "async-trait",
  "frame-metadata",
@@ -2423,6 +2427,8 @@ dependencies = [
 [[package]]
 name = "polymesh-api-codegen"
 version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e727b18b975a76405886f2b32c35381b7b874ae238bc37b047aad7f8be639e5a"
 dependencies = [
  "anyhow",
  "frame-metadata",
@@ -2443,6 +2449,8 @@ dependencies = [
 [[package]]
 name = "polymesh-api-codegen-macro"
 version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "25284f5c34e0cad4861e53e52f8ea1bbe76e42b976e9885886885271afbdfc6b"
 dependencies = [
  "darling 0.14.1",
  "polymesh-api-codegen",

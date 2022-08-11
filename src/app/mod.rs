@@ -6,6 +6,7 @@ use egui_extras::{Size, StripBuilder, TableBuilder};
 use crate::backend::*;
 
 const POLYMESH_STAGING: &str = "wss://staging-rpc.polymesh.live";
+const POLYMESH_TESTNET: &str = "wss://testnet-rpc.polymesh.live";
 const MAX_BACKEND_UPDATES: usize = 100;
 const MAX_RECENT_BLOCKS: usize = 2000;
 const MAX_RECENT_EVENTS: usize = 2000;
@@ -62,7 +63,7 @@ impl Default for BackendState {
     Self {
       open: true,
       need_save: true,
-      url: POLYMESH_STAGING.to_owned(),
+      url: POLYMESH_TESTNET.to_owned(),
       genesis_hash: None,
       best_block: 0,
       preload_blocks: PRELOAD_BLOCKS as u32,
@@ -268,7 +269,10 @@ impl BackendState {
 
   pub fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
     ui.label("Polymesh: ");
-    if ui.button("Staging").clicked() {
+    if ui.button("Polymesh Testnet").clicked() {
+      self.set_url(POLYMESH_TESTNET);
+    }
+    if ui.button("Polymesh Staging").clicked() {
       self.set_url(POLYMESH_STAGING);
     }
     ui.label("Custom: ");
