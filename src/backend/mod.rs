@@ -1,5 +1,3 @@
-use anyhow::Result;
-
 use tokio::sync::mpsc;
 
 use serde_json::{to_value, Value};
@@ -11,6 +9,8 @@ use polymesh_api::*;
 use tokio::spawn as spawn_local;
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen_futures::spawn_local;
+
+pub type Result<T, E = String> = core::result::Result<T, E>;
 
 #[derive(Clone, Debug)]
 pub struct EventInfo {
@@ -126,14 +126,16 @@ impl Backend {
     self.url = url.to_string();
     self
       .req_tx
-      .blocking_send(BackendRequest::ConnectTo(url.to_string()))?;
+      .blocking_send(BackendRequest::ConnectTo(url.to_string()))
+      .map_err(|e| e.to_string())?;
     Ok(())
   }
 
   pub fn get_block_info(&self, hash: BlockHash) -> Result<()> {
     self
       .req_tx
-      .blocking_send(BackendRequest::GetBlockInfo(hash))?;
+      .blocking_send(BackendRequest::GetBlockInfo(hash))
+      .map_err(|e| e.to_string())?;
     Ok(())
   }
 
@@ -251,7 +253,7 @@ impl InnerBackend {
   }
 
   async fn send(&self, msg: BackendEvent) -> Result<()> {
-    Ok(self.event_tx.send(msg).await?)
+    Ok(self.event_tx.send(msg).await.map_err(|e| e.to_string())?)
   }
 
   async fn push_block(&self, header: Header) -> Result<()> {
@@ -260,7 +262,8 @@ impl InnerBackend {
     let events = self
       .api
       .block_events(Some(hash))
-      .await?
+      .await
+      .map_err(|e| e.to_string())?
       .into_iter()
       .enumerate()
       .map(|(idx, ev)| EventInfo::new(header.number, idx as u32, ev))
@@ -274,16 +277,21 @@ impl InnerBackend {
     Ok(())
   }
 
-  async fn get_block_hash(&self, number: BlockNumber) -> Result<BlockHash> {
-    Ok(self.api.client().get_block_hash(number).await?)
+  async fn get_block_hash(&self, number: BlockNumber) -> Result<Option<BlockHash>> {
+    let hash = self.api.client().get_block_hash(number).await
+      .map_err(|e| e.to_string())?;
+    Ok(hash)
   }
 
   async fn get_block_header(&self, hash: Option<BlockHash>) -> Result<Option<Header>> {
-    Ok(self.api.client().get_block_header(hash).await?)
+    let header = self.api.client().get_block_header(hash).await
+      .map_err(|e| e.to_string())?;
+    Ok(header)
   }
 
   async fn connected(&self, is_reconnect: bool) -> Result<()> {
-    let genesis = self.get_block_hash(0).await?;
+    let genesis = self.get_block_hash(0).await?
+      .ok_or_else(|| format!("Missing Genesis Hash"))?;
     self
       .send(BackendEvent::Connected {
         genesis,
@@ -299,7 +307,8 @@ impl InnerBackend {
     let client = self.api.client();
 
     // Spawn background watcher for new blocks.
-    let sub_blocks = client.subscribe_blocks().await?;
+    let sub_blocks = client.subscribe_blocks().await
+      .map_err(|e| e.to_string())?;
     HeaderWatcher::spawn(sub_blocks, self.event_tx.clone());
 
     // Grab and push the current block.
@@ -312,7 +321,8 @@ impl InnerBackend {
       match req {
         BackendRequest::ConnectTo(url) => {
           // Reconnect and restart.
-          self.api = Api::new(&url).await?;
+          self.api = Api::new(&url).await
+            .map_err(|e| e.to_string())?;
           return Ok(true);
         }
         BackendRequest::GetBlockInfo(hash) => match self.get_block_header(Some(hash)).await? {
@@ -349,9 +359,10 @@ impl HeaderWatcher {
   }
 
   async fn run(mut self) -> Result<()> {
-    while let Some(header) = self.sub.next().await.transpose()? {
+    while let Some(header) = self.sub.next().await.transpose().map_err(|e| e.to_string())? {
       //log::info!("{}: {}", header.number, header.hash());
-      self.event_tx.send(BackendEvent::NewHeader(header)).await?;
+      self.event_tx.send(BackendEvent::NewHeader(header)).await
+        .map_err(|e| e.to_string())?;
     }
     Ok(())
   }

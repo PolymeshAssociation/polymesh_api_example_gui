@@ -19,7 +19,6 @@ eframe = { version = "0.18.0", features = ["persistence"] }
 serde = { version = "1", features = ["derive"] } # You only need this if you want app persistence
 
 serde_json = { version = "1.0", features = ["preserve_order"] }
-anyhow = "1.0.58"
 log = "0.4.17"
 egui_extras = { version = "0.18.0", features = ["serde"] }
 hex = "0.4.3"
@@ -30,7 +29,7 @@ hex = "0.4.3"
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 tracing-subscriber = "0.3"
 tokio = { version = "1.19", features = ["full"] }
-polymesh-api = { version = "0.2" }
+polymesh-api = { version = "2.0", features = ["download_metadata"] }
 
 # web:
 [target.'cfg(target_arch = "wasm32")'.dependencies]
@@ -38,7 +37,7 @@ console_log = { version = "0.2", features = ["color"] }
 console_error_panic_hook = "0.1.6"
 tracing-wasm = "0.2"
 tokio = { version = "1.19", features = ["rt", "sync"] }
-polymesh-api = { version = "0.2", default-features = false, features = ["wasm"] }
+polymesh-api = { version = "2.0", default-features = false, features = ["wasm", "serde"] }
 wasm-bindgen-futures = "0.4.32"
 
 [profile.release]
@@ -55,3 +54,4 @@ opt-level = 2 # fast and small wasm
 # eframe = { path = "../egui/eframe" }
 
 #polymesh-api = { path = "../polymesh-api/" }
+polymesh-api = { git = "https://github.com/PolymeshAssociation/polymesh-api" }

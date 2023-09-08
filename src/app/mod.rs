@@ -14,7 +14,7 @@ const MAX_RECENT_EVENTS: usize = 2000;
 #[cfg(target_arch = "wasm32")]
 const PRELOAD_BLOCKS: u32 = 20;
 #[cfg(not(target_arch = "wasm32"))]
-const PRELOAD_BLOCKS: u32 = 1000;
+const PRELOAD_BLOCKS: u32 = 200;
 
 #[derive(Debug)]
 pub struct BlockEventSummary {
