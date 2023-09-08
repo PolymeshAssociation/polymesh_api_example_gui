@@ -278,19 +278,29 @@ impl InnerBackend {
   }
 
   async fn get_block_hash(&self, number: BlockNumber) -> Result<Option<BlockHash>> {
-    let hash = self.api.client().get_block_hash(number).await
+    let hash = self
+      .api
+      .client()
+      .get_block_hash(number)
+      .await
       .map_err(|e| e.to_string())?;
     Ok(hash)
   }
 
   async fn get_block_header(&self, hash: Option<BlockHash>) -> Result<Option<Header>> {
-    let header = self.api.client().get_block_header(hash).await
+    let header = self
+      .api
+      .client()
+      .get_block_header(hash)
+      .await
       .map_err(|e| e.to_string())?;
     Ok(header)
   }
 
   async fn connected(&self, is_reconnect: bool) -> Result<()> {
-    let genesis = self.get_block_hash(0).await?
+    let genesis = self
+      .get_block_hash(0)
+      .await?
       .ok_or_else(|| format!("Missing Genesis Hash"))?;
     self
       .send(BackendEvent::Connected {
@@ -307,8 +317,7 @@ impl InnerBackend {
     let client = self.api.client();
 
     // Spawn background watcher for new blocks.
-    let sub_blocks = client.subscribe_blocks().await
-      .map_err(|e| e.to_string())?;
+    let sub_blocks = client.subscribe_blocks().await.map_err(|e| e.to_string())?;
     HeaderWatcher::spawn(sub_blocks, self.event_tx.clone());
 
     // Grab and push the current block.
@@ -321,8 +330,7 @@ impl InnerBackend {
       match req {
         BackendRequest::ConnectTo(url) => {
           // Reconnect and restart.
-          self.api = Api::new(&url).await
-            .map_err(|e| e.to_string())?;
+          self.api = Api::new(&url).await.map_err(|e| e.to_string())?;
           return Ok(true);
         }
         BackendRequest::GetBlockInfo(hash) => match self.get_block_header(Some(hash)).await? {
@@ -359,9 +367,18 @@ impl HeaderWatcher {
   }
 
   async fn run(mut self) -> Result<()> {
-    while let Some(header) = self.sub.next().await.transpose().map_err(|e| e.to_string())? {
+    while let Some(header) = self
+      .sub
+      .next()
+      .await
+      .transpose()
+      .map_err(|e| e.to_string())?
+    {
       //log::info!("{}: {}", header.number, header.hash());
-      self.event_tx.send(BackendEvent::NewHeader(header)).await
+      self
+        .event_tx
+        .send(BackendEvent::NewHeader(header))
+        .await
         .map_err(|e| e.to_string())?;
     }
     Ok(())
