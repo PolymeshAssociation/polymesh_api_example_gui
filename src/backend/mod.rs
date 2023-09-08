@@ -49,7 +49,7 @@ impl EventInfo {
         }
       }
       Ok(event) => {
-        format!("Invalid runtime event type.");
+        log::error!("Invalid runtime event type.");
         event
       }
     };
@@ -253,7 +253,7 @@ impl InnerBackend {
   }
 
   async fn send(&self, msg: BackendEvent) -> Result<()> {
-    Ok(self.event_tx.send(msg).await.map_err(|e| e.to_string())?)
+    self.event_tx.send(msg).await.map_err(|e| e.to_string())
   }
 
   async fn push_block(&self, header: Header) -> Result<()> {
@@ -301,7 +301,7 @@ impl InnerBackend {
     let genesis = self
       .get_block_hash(0)
       .await?
-      .ok_or_else(|| format!("Missing Genesis Hash"))?;
+      .ok_or("Missing Genesis Hash")?;
     self
       .send(BackendEvent::Connected {
         genesis,
@@ -333,12 +333,11 @@ impl InnerBackend {
           self.api = Api::new(&url).await.map_err(|e| e.to_string())?;
           return Ok(true);
         }
-        BackendRequest::GetBlockInfo(hash) => match self.get_block_header(Some(hash)).await? {
-          Some(header) => {
+        BackendRequest::GetBlockInfo(hash) => {
+          if let Some(header) = self.get_block_header(Some(hash)).await? {
             self.push_block(header).await?;
           }
-          None => (),
-        },
+        }
       }
     }
 
@@ -358,11 +357,8 @@ impl HeaderWatcher {
   }
 
   async fn start(self) {
-    match self.run().await {
-      Err(err) => {
-        log::error!("HeaderWatcher: {err:?}");
-      }
-      Ok(_) => (),
+    if let Err(err) = self.run().await {
+      log::error!("HeaderWatcher: {err:?}");
     }
   }
 

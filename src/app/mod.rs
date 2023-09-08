@@ -66,7 +66,7 @@ impl Default for BackendState {
       url: POLYMESH_TESTNET.to_owned(),
       genesis_hash: None,
       best_block: 0,
-      preload_blocks: PRELOAD_BLOCKS as u32,
+      preload_blocks: PRELOAD_BLOCKS,
       preload_next: None,
 
       hash_to_number: Default::default(),
@@ -92,20 +92,14 @@ impl BackendState {
   }
 
   fn connect(&mut self) {
-    match self.backend.connect_to(&self.url) {
-      Err(err) => {
-        log::error!("Failed to send ConnectTo reqest to backend: {err:?}");
-      }
-      _ => (),
+    if let Err(err) = self.backend.connect_to(&self.url) {
+      log::error!("Failed to send ConnectTo reqest to backend: {err:?}");
     }
   }
 
   fn get_block_info(&self, hash: BlockHash) {
-    match self.backend.get_block_info(hash) {
-      Err(err) => {
-        log::error!("Failed to send block info reqest to backend: {err:?}");
-      }
-      _ => (),
+    if let Err(err) = self.backend.get_block_info(hash) {
+      log::error!("Failed to send block info reqest to backend: {err:?}");
     }
   }
 
@@ -142,9 +136,8 @@ impl BackendState {
     self.preload_blocks -= 1;
     let hash = block.header.parent_hash;
     self.preload_next = Some(hash);
-    match self.backend.get_block_info(hash) {
-      Err(err) => log::error!("Backend error: {err:?}"),
-      _ => (),
+    if let Err(err) = self.backend.get_block_info(hash) {
+      log::error!("Backend error: {err:?}");
     }
   }
 
@@ -169,9 +162,8 @@ impl BackendState {
         }
         Some(BackendEvent::NewHeader(header)) => {
           // New block header.  Request block info.
-          match self.backend.get_block_info(header.hash()) {
-            Err(err) => log::error!("Backend error: {err:?}"),
-            _ => (),
+          if let Err(err) = self.backend.get_block_info(header.hash()) {
+            log::error!("Backend error: {err:?}");
           }
         }
         Some(BackendEvent::BlockInfo(block)) => {
@@ -398,7 +390,7 @@ impl ChainInfoApp {
 
         for event in events.range(row_range) {
           ui.horizontal(|ui| {
-            ui.label(format!("{}", event.name));
+            ui.label(event.name.to_string());
             ui.with_layout(egui::Layout::right_to_left(), |ui| {
               if ui
                 .link(format!("{}-{}", event.block, event.number))
@@ -500,7 +492,7 @@ impl BlockDetailsApp {
     if self.last_anchor != anchor {
       self.last_anchor = anchor.to_string();
       if let Some(param) = anchor.strip_prefix(self.anchor()) {
-        if param.len() == 0 {
+        if param.is_empty() {
           self.selected_block = SelectedBlock::Best;
         } else if param.starts_with("0x") {
           // Parse block hash.
@@ -640,7 +632,7 @@ impl BlockDetailsApp {
               ui.label(format!("{:?}", event.phase));
             });
             row.col(|ui| {
-              ui.label(format!("{}", event.name));
+              ui.label(event.name.to_string());
             });
             row.col(|ui| {
               ui.label(format!("{:?}", serde_json::to_string(&event.value)));
@@ -698,7 +690,7 @@ impl SubApp for BlockDetailsApp {
         if let Some(block) = block {
           app_event = self.show_block_ui(ui, block);
         } else {
-          ui.label(format!("Loading block..."));
+          ui.label("Loading block...".to_string());
         }
       }
       Err(err) => {
@@ -744,21 +736,15 @@ impl State {
     let mut app_event = None;
     for app in self.apps() {
       if app.match_anchor(&anchor) {
-        match app.update(backend, ctx, &anchor) {
-          Some(event) => {
-            app_event = Some(event);
-            break;
-          }
-          None => (),
+        if let Some(event) = app.update(backend, ctx, &anchor) {
+          app_event = Some(event);
+          break;
         }
       }
     }
-    match app_event {
-      Some(SubAppEvent::BlockDetails(hash)) => {
-        let anchor = format!("block_details/{:?}", hash);
-        self.open_anchor(&anchor, ctx, frame);
-      }
-      _ => (),
+    if let Some(SubAppEvent::BlockDetails(hash)) = app_event {
+      let anchor = format!("block_details/{:?}", hash);
+      self.open_anchor(&anchor, ctx, frame);
     }
   }
 }
