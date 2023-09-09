@@ -1,4 +1,4 @@
-var cacheName = 'egui-template-pwa';
+var cacheName = 'polymesh-rust-gui-pwa';
 var filesToCache = [
   './',
   './index.html',

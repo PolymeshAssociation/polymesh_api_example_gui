@@ -1,7 +1,7 @@
 use std::collections::{HashMap, VecDeque};
 
 use egui::*;
-use egui_extras::{Size, StripBuilder, TableBuilder};
+use egui_extras::{Size, Column, StripBuilder, TableBuilder};
 
 use crate::backend::*;
 
@@ -274,7 +274,7 @@ impl BackendState {
     ui.horizontal(|ui| {
       ui.label("Custom node: ");
       let resp = ui.text_edit_singleline(&mut self.url);
-      if resp.lost_focus() && ui.input().key_pressed(egui::Key::Enter) {
+      if resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
         self.need_save = true;
       }
     });
@@ -391,7 +391,7 @@ impl ChainInfoApp {
         for event in events.range(row_range) {
           ui.horizontal(|ui| {
             ui.label(event.name.to_string());
-            ui.with_layout(egui::Layout::right_to_left(), |ui| {
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
               if ui
                 .link(format!("{}-{}", event.block, event.number))
                 .clicked()
@@ -554,12 +554,12 @@ impl BlockDetailsApp {
     let text_height = egui::TextStyle::Body.resolve(ui.style()).size;
     TableBuilder::new(ui)
       .striped(true)
-      .cell_layout(egui::Layout::left_to_right().with_cross_align(egui::Align::Center))
-      .column(Size::initial(100.0).at_least(60.0))
-      .column(Size::remainder().at_least(60.0))
-      .column(Size::remainder().at_least(60.0))
-      .column(Size::remainder().at_least(60.0))
-      .column(Size::remainder().at_least(60.0))
+      .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
+      .column(Column::initial(100.0).at_least(60.0))
+      .column(Column::remainder().at_least(60.0))
+      .column(Column::remainder().at_least(60.0))
+      .column(Column::remainder().at_least(60.0))
+      .column(Column::remainder().at_least(60.0))
       .resizable(false)
       .header(20.0, |mut header| {
         header.col(|ui| {
@@ -608,10 +608,10 @@ impl BlockDetailsApp {
     let text_height = egui::TextStyle::Body.resolve(ui.style()).size;
     TableBuilder::new(ui)
       .striped(true)
-      .cell_layout(egui::Layout::left_to_right().with_cross_align(egui::Align::Center))
-      .column(Size::initial(150.0).at_least(60.0))
-      .column(Size::initial(150.0).at_least(60.0))
-      .column(Size::remainder().at_least(100.0))
+      .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
+      .column(Column::initial(150.0).at_least(60.0))
+      .column(Column::initial(150.0).at_least(60.0))
+      .column(Column::remainder().at_least(100.0))
       .resizable(false)
       .header(20.0, |mut header| {
         header.col(|ui| {
@@ -727,7 +727,9 @@ impl State {
     }
     self.current_anchor = anchor.to_string();
     if frame.is_web() {
-      ctx.output().open_url(format!("#{}", anchor));
+      ctx.output_mut(|o| {
+        o.open_url = Some(egui::output::OpenUrl::same_tab(format!("#{}", anchor)));
+      });
     }
   }
 
@@ -820,7 +822,8 @@ impl eframe::App for PolymeshApp {
     self.save_changes(frame);
 
     #[cfg(target_arch = "wasm32")]
-    if let Some(web_info) = frame.info().web_info.as_ref() {
+    {
+      let web_info = &frame.info().web_info;
       if let Some(anchor) = web_info.location.hash.strip_prefix('#') {
         self.state.current_anchor = anchor.to_owned();
       }
