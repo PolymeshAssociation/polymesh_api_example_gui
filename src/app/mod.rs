@@ -1,7 +1,7 @@
 use std::collections::{HashMap, VecDeque};
 
 use egui::*;
-use egui_extras::{Size, Column, StripBuilder, TableBuilder};
+use egui_extras::{Column, Size, StripBuilder, TableBuilder};
 
 use crate::backend::*;
 
