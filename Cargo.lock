@@ -4718,7 +4718,7 @@ checksum = "734676eb262c623cec13c3155096e08d1f8f29adce39ba17948b18dad1e54142"
 [[package]]
 name = "subxt-signer"
 version = "0.31.0"
-source = "git+https://github.com/Neopallium/subxt#741dd5cfaaff37a1fa51ad3bcd044f1b0ecf1fee"
+source = "git+https://github.com/paritytech/subxt#022d709d02e25aa895336f5224a9ea8b44848c5e"
 dependencies = [
  "bip39",
  "getrandom 0.2.10",

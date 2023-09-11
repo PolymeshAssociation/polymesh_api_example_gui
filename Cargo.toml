@@ -64,6 +64,5 @@ opt-level = 2
 # eframe = { path = "../egui/eframe" }
 
 #polymesh-api = { path = "../polymesh-api/" }
-#subxt-signer = { path = "../subxt/signer/" }
 polymesh-api = { git = "https://github.com/PolymeshAssociation/polymesh-api" }
-subxt-signer = { git = "https://github.com/Neopallium/subxt" }
+subxt-signer = { git = "https://github.com/paritytech/subxt" }
